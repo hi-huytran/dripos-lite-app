@@ -9,22 +9,29 @@ import {
   View,
 } from 'react-native';
 import { TicketSummary } from '../../components/TicketSummary';
-import { getTicket, Ticket } from '../../lib/api';
+import { Ticket } from '../../lib/api';
+import { resolveTicket } from '../../lib/ticketQueue';
 
 export default function TicketDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadTicket = useCallback(() => {
+  const loadTicket = useCallback(async () => {
     setLoading(true);
     setError(null);
-    getTicket(id)
-      .then(setTicket)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+    try {
+      const resolved = await resolveTicket(id);
+      setPending(resolved.pending);
+      setTicket(resolved.ticket);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -63,7 +70,18 @@ export default function TicketDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: `Ticket #${ticket.id}` }} />
+      <Stack.Screen
+        options={{ title: pending ? 'Pending Sync' : `Ticket #${ticket.id}` }}
+      />
+
+      {pending && (
+        <View style={styles.pendingBanner}>
+          <Text style={styles.pendingBannerText}>
+            Pending sync — this order hasn't reached the server yet.
+          </Text>
+        </View>
+      )}
+
       <TicketSummary ticket={ticket} />
     </ScrollView>
   );
@@ -81,6 +99,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+  },
+  pendingBanner: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  pendingBannerText: {
+    color: '#664d03',
+    fontSize: 13,
   },
   errorText: {
     color: '#e33',

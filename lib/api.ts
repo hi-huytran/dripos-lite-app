@@ -1,4 +1,13 @@
+import { isOffline } from './offlineStatus';
+import { cacheProducts, loadCachedProducts } from './productsCache';
+
 const API_BASE_URL = 'https://dripos-lite-backend-production.up.railway.app';
+
+// Thrown when `fetch` itself fails (no response reached the app at all) —
+// as opposed to a reachable server responding with a 4xx/5xx error. This
+// distinction lets callers fall back to cached/queued data only for real
+// connectivity failures, not for genuine validation/business errors.
+export class NetworkError extends Error {}
 
 export interface ModifierOption {
   id: string;
@@ -32,6 +41,7 @@ export interface CreateTicketItemInput {
 export interface CreateTicketPayload {
   items: CreateTicketItemInput[];
   tenderedCents: number;
+  clientTicketId: string;
 }
 
 export interface TicketItemModifier {
@@ -73,10 +83,15 @@ interface ApiErrorBody {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch {
+    throw new NetworkError('Network request failed');
+  }
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
@@ -94,8 +109,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getProducts(): Promise<Product[]> {
-  return request<Product[]>('/products');
+export async function getProducts(): Promise<Product[]> {
+  if (isOffline()) {
+    const cached = await loadCachedProducts();
+    if (cached) return cached;
+    throw new Error('No internet connection and no cached products available');
+  }
+
+  try {
+    const products = await request<Product[]>('/products');
+    await cacheProducts(products);
+    return products;
+  } catch (err) {
+    if (err instanceof NetworkError) {
+      const cached = await loadCachedProducts();
+      if (cached) return cached;
+    }
+    throw err;
+  }
 }
 
 export function getProduct(id: string): Promise<Product> {

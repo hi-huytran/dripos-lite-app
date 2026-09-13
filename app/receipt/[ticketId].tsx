@@ -9,23 +9,30 @@ import {
   View,
 } from 'react-native';
 import { TicketSummary } from '../../components/TicketSummary';
-import { getTicket, Ticket } from '../../lib/api';
+import { Ticket } from '../../lib/api';
+import { resolveTicket } from '../../lib/ticketQueue';
 
 export default function ReceiptScreen() {
   const { ticketId } = useLocalSearchParams<{ ticketId: string }>();
   const router = useRouter();
 
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadTicket = useCallback(() => {
+  const loadTicket = useCallback(async () => {
     setLoading(true);
     setError(null);
-    getTicket(ticketId)
-      .then(setTicket)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+    try {
+      const resolved = await resolveTicket(ticketId);
+      setPending(resolved.pending);
+      setTicket(resolved.ticket);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, [ticketId]);
 
   useEffect(() => {
@@ -64,7 +71,18 @@ export default function ReceiptScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: `Receipt #${ticket.id}` }} />
+      <Stack.Screen
+        options={{ title: pending ? 'Pending Sync' : `Receipt #${ticket.id}` }}
+      />
+
+      {pending && (
+        <View style={styles.pendingBanner}>
+          <Text style={styles.pendingBannerText}>
+            Pending sync — this order hasn't reached the server yet. Totals
+            below are estimated on this device.
+          </Text>
+        </View>
+      )}
 
       <TicketSummary ticket={ticket} />
 
@@ -92,6 +110,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+  },
+  pendingBanner: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  pendingBannerText: {
+    color: '#664d03',
+    fontSize: 13,
   },
   newOrderButton: {
     marginTop: 28,

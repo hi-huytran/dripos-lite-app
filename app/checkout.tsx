@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -10,9 +11,11 @@ import {
   View,
 } from 'react-native';
 import { useCart } from '../context/CartContext';
-import { createTicket } from '../lib/api';
+import { useOffline } from '../context/OfflineContext';
+import { createTicket, NetworkError } from '../lib/api';
 import { formatCents } from '../lib/format';
-import { calculateUnitPriceCents } from '../lib/pricing';
+import { calculateUnitPriceCents, buildOfflineTicketItems } from '../lib/pricing';
+import { enqueueTicket } from '../lib/ticketQueue';
 import { useProductsById } from '../hooks/useProductsById';
 
 const TAX_RATE = 0.08875;
@@ -40,6 +43,7 @@ function parseTenderedCents(value: string): number | null {
 export default function CheckoutScreen() {
   const router = useRouter();
   const { items, dispatch } = useCart();
+  const { isOffline, refreshPendingSyncCount } = useOffline();
 
   const [selectedMethod, setSelectedMethod] = useState<string>('cash');
   const [tenderedInput, setTenderedInput] = useState('');
@@ -91,11 +95,48 @@ export default function CheckoutScreen() {
     );
   }
 
+  async function queueOrderOffline(clientTicketId: string) {
+    if (tenderedCents === null || !productsById) return;
+
+    await enqueueTicket({
+      clientTicketId,
+      payload: {
+        items: items.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          selectedOptionIds: item.selectedOptionIds,
+        })),
+        tenderedCents,
+        clientTicketId,
+      },
+      items: buildOfflineTicketItems(items, productsById),
+      subtotalCents,
+      taxCents: estimatedTaxCents,
+      totalCents: estimatedTotalCents,
+      tenderedCents,
+      changeCents: tenderedCents - estimatedTotalCents,
+      queuedAt: new Date().toISOString(),
+      status: 'pending',
+    });
+    await refreshPendingSyncCount();
+
+    dispatch({ type: 'CLEAR_CART' });
+    router.dismissTo('/');
+    router.push(`/receipt/${clientTicketId}`);
+  }
+
   async function handleCompleteOrder() {
     if (tenderedCents === null) return;
 
     setSubmitting(true);
     setSubmitError(null);
+
+    const clientTicketId = Crypto.randomUUID();
+
+    if (isOffline) {
+      await queueOrderOffline(clientTicketId);
+      return;
+    }
 
     try {
       const ticket = await createTicket({
@@ -105,6 +146,7 @@ export default function CheckoutScreen() {
           selectedOptionIds: item.selectedOptionIds,
         })),
         tenderedCents,
+        clientTicketId,
       });
 
       dispatch({ type: 'CLEAR_CART' });
@@ -114,6 +156,13 @@ export default function CheckoutScreen() {
       router.dismissTo('/');
       router.push(`/receipt/${ticket.id}`);
     } catch (err) {
+      if (err instanceof NetworkError) {
+        // Looked online a moment ago but the request didn't make it —
+        // fall back to the same offline queue path rather than losing
+        // the order.
+        await queueOrderOffline(clientTicketId);
+        return;
+      }
       setSubmitError((err as Error).message);
       setSubmitting(false);
     }

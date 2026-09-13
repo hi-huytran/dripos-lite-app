@@ -8,8 +8,18 @@ import {
   Text,
   View,
 } from 'react-native';
-import { getTickets, TicketListItem } from '../../lib/api';
+import { getTickets } from '../../lib/api';
 import { formatCents } from '../../lib/format';
+import { getQueuedTickets } from '../../lib/ticketQueue';
+
+interface TicketRow {
+  key: string;
+  navTarget: string;
+  statusLabel: string;
+  totalCents: number;
+  createdAt: string;
+  pending: boolean;
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -17,17 +27,48 @@ function formatDate(iso: string): string {
 
 export default function TicketsListScreen() {
   const router = useRouter();
-  const [tickets, setTickets] = useState<TicketListItem[]>([]);
+  const [rows, setRows] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadTickets = useCallback(() => {
+  const loadTickets = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    getTickets()
-      .then(setTickets)
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setLoading(false));
+
+    let serverError: string | null = null;
+    let serverRows: TicketRow[] = [];
+    try {
+      const server = await getTickets();
+      serverRows = server.map((t) => ({
+        key: `server-${t.id}`,
+        navTarget: String(t.id),
+        statusLabel: t.status,
+        totalCents: t.totalCents,
+        createdAt: t.createdAt,
+        pending: false,
+      }));
+    } catch (err) {
+      serverError = (err as Error).message;
+    }
+
+    const queued = await getQueuedTickets();
+    const queuedRows: TicketRow[] = queued.map((t) => ({
+      key: `queued-${t.clientTicketId}`,
+      navTarget: t.clientTicketId,
+      statusLabel: 'Pending sync',
+      totalCents: t.totalCents,
+      createdAt: t.queuedAt,
+      pending: true,
+    }));
+
+    const merged = [...serverRows, ...queuedRows].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    );
+
+    setRows(merged);
+    // Only surface the server error if we have nothing at all to show —
+    // locally-queued tickets should still render even if GET /tickets fails.
+    setError(merged.length === 0 ? serverError : null);
+    setLoading(false);
   }, []);
 
   // Tickets are created elsewhere (Checkout), so refetch every time this
@@ -64,7 +105,7 @@ export default function TicketsListScreen() {
     );
   }
 
-  if (tickets.length === 0) {
+  if (rows.length === 0) {
     return (
       <View style={styles.center}>
         <Stack.Screen options={{ title: 'Tickets' }} />
@@ -77,21 +118,25 @@ export default function TicketsListScreen() {
     <View style={styles.container}>
       <Stack.Screen options={{ title: 'Tickets' }} />
       <FlatList
-        data={tickets}
-        keyExtractor={(item) => String(item.id)}
+        data={rows}
+        keyExtractor={(item) => item.key}
         renderItem={({ item }) => (
           <Pressable
-            style={styles.row}
-            onPress={() => router.push(`/tickets/${item.id}`)}
+            style={[styles.row, item.pending && styles.rowPending]}
+            onPress={() => router.push(`/tickets/${item.navTarget}`)}
             accessibilityRole="button"
-            accessibilityLabel={`Ticket ${item.id}, ${item.status}, ${formatCents(
+            accessibilityLabel={`${
+              item.pending ? 'Pending order' : `Ticket ${item.navTarget}`
+            }, ${item.statusLabel}, ${formatCents(
               item.totalCents
             )}, ${formatDate(item.createdAt)}`}
           >
             <View>
-              <Text style={styles.ticketId}>Ticket #{item.id}</Text>
+              <Text style={styles.ticketId}>
+                {item.pending ? 'Pending Order' : `Ticket #${item.navTarget}`}
+              </Text>
               <Text style={styles.meta}>
-                {item.status} • {formatDate(item.createdAt)}
+                {item.statusLabel} • {formatDate(item.createdAt)}
               </Text>
             </View>
             <Text style={styles.total}>{formatCents(item.totalCents)}</Text>
@@ -120,6 +165,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#ccc',
+  },
+  rowPending: {
+    backgroundColor: '#fff8e1',
   },
   ticketId: {
     fontSize: 16,
