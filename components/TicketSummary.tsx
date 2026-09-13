@@ -45,18 +45,32 @@ export function TicketSummary({ ticket }: { ticket: Ticket }) {
             {formatCents(ticket.totalCents)}
           </Text>
         </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Tendered</Text>
-          <Text style={styles.summaryValue}>
-            {formatCents(ticket.tenderedCents)}
-          </Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Change</Text>
-          <Text style={styles.summaryValue}>
-            {formatCents(ticket.changeCents)}
-          </Text>
-        </View>
+      </View>
+
+      <View style={styles.paymentsSection}>
+        <Text style={styles.paymentsHeading}>Payments</Text>
+        {ticket.payments.length === 0 ? (
+          <Text style={styles.summaryLabel}>No payments recorded yet</Text>
+        ) : (
+          ticket.payments.map((payment, index) => (
+            <View key={payment.id ?? index} style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>
+                Tender {index + 1}: {formatCents(payment.tenderedCents)}
+              </Text>
+              <Text style={styles.summaryValue}>
+                change {formatCents(payment.changeCents)}
+              </Text>
+            </View>
+          ))
+        )}
+        {ticket.status !== 'paid' && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.totalLabel}>Remaining</Text>
+            <Text style={styles.totalValue}>
+              {formatCents(ticket.remainingCents)}
+            </Text>
+          </View>
+        )}
       </View>
     </>
   );
@@ -88,6 +102,17 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#222',
+  },
+  paymentsSection: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ccc',
+  },
+  paymentsHeading: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 6,
   },
   summaryRow: {
     flexDirection: 'row',

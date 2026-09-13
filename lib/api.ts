@@ -40,7 +40,6 @@ export interface CreateTicketItemInput {
 
 export interface CreateTicketPayload {
   items: CreateTicketItemInput[];
-  tenderedCents: number;
   clientTicketId: string;
 }
 
@@ -59,6 +58,14 @@ export interface TicketItem {
   modifiers: TicketItemModifier[];
 }
 
+export interface Payment {
+  id: number;
+  tenderedCents: number;
+  appliedCents: number;
+  changeCents: number;
+  createdAt: string;
+}
+
 export interface Ticket {
   id: number;
   status: string;
@@ -66,9 +73,20 @@ export interface Ticket {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
-  tenderedCents: number;
-  changeCents: number;
+  tenderedCents: number | null;
+  changeCents: number | null;
   createdAt: string;
+  remainingCents: number;
+  payments: Payment[];
+}
+
+export interface AddPaymentResponse {
+  payment: Payment;
+  ticket: {
+    id: number;
+    status: string;
+    remainingCents: number;
+  };
 }
 
 export interface TicketListItem {
@@ -137,6 +155,17 @@ export function createTicket(payload: CreateTicketPayload): Promise<Ticket> {
   return request<Ticket>('/tickets', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export function addPayment(
+  ticketId: number,
+  tenderedCents: number,
+  clientPaymentId: string
+): Promise<AddPaymentResponse> {
+  return request<AddPaymentResponse>(`/tickets/${ticketId}/payments`, {
+    method: 'POST',
+    body: JSON.stringify({ tenderedCents, clientPaymentId }),
   });
 }
 
